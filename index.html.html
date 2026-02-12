@@ -1,0 +1,1262 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>منصة القادسية التعليمية</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{ --g:#006C35; --gl:#00A352; --gd:#004d26; }
+*{ margin:0; padding:0; box-sizing:border-box; }
+body{ font-family:'IBM Plex Sans Arabic','Segoe UI',sans-serif; }
+input, textarea{ font-family:inherit; }
+@keyframes slideUp{ from{opacity:0;transform:translateY(18px)} to{opacity:1;transform:translateY(0)} }
+@keyframes fadeIn{ from{opacity:0} to{opacity:1} }
+@keyframes msgIn{ from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+@keyframes spin{ to{transform:rotate(360deg)} }
+.slide-up{ animation:slideUp .4s ease-out forwards; opacity:0; }
+.fade-in{ animation:fadeIn .3s ease-out forwards; opacity:0; }
+.msg-in{ animation:msgIn .25s ease-out; }
+.spin{ animation:spin .8s linear infinite; }
+::-webkit-scrollbar{ width:5px; }
+::-webkit-scrollbar-thumb{ background:#94a3b8; border-radius:3px; }
+.bubble-user{ background:linear-gradient(135deg,var(--g),var(--gl)); }
+.bubble-ai{ background:#fff; border:1px solid #e2e8f0; }
+.progress-track{ background:#e2e8f0; border-radius:999px; overflow:hidden; }
+.progress-fill{ height:100%; border-radius:999px; background:linear-gradient(90deg,var(--g),var(--gl)); transition:width .5s ease; }
+.chart-bar{ background:linear-gradient(180deg,var(--gl),var(--g)); border-radius:6px 6px 0 0; transition:height .5s ease; }
+.gpa-ring{ position:relative; width:130px; height:130px; }
+.gpa-ring svg{ transform:rotate(-90deg); }
+.gpa-ring .val{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; }
+/* timetable grid */
+.timetable{ border:2px solid #cbd5e1; }
+.timetable th{ background:linear-gradient(135deg,var(--gd),var(--g)); color:#fff; padding:12px 8px; font-size:.8rem; text-align:center; font-weight:700; border:1px solid #94a3b8; }
+.timetable td{ border:1px solid #cbd5e1; padding:10px 6px; font-size:.75rem; text-align:center; min-height:60px; vertical-align:middle; background:#fff; }
+.timetable td:first-child{ background:linear-gradient(135deg,#f8fafc,#e2e8f0); font-weight:700; color:var(--gd); font-size:.85rem; border-left:3px solid var(--g); }
+.timetable tbody tr:hover td{ background:#f0fdf4; }
+.cell-lesson{ background:linear-gradient(135deg,#d1fae5,#a7f3d0); border-radius:8px; padding:6px 8px; font-size:.75rem; color:#065f46; font-weight:700; border:1px solid #6ee7b7; box-shadow:0 1px 2px rgba(0,0,0,0.05); }
+</style>
+</head>
+<body class="bg-gray-50">
+<div id="app"></div>
+<script>
+// ===================== STATE =====================
+let currentUser=null, currentView='login', selectedSubject=null, sidebarOpen=true, isRegistering=false;
+let aiMessages=[], aiLoading=false;
+let chatPartner=null; // {id, username, uid}
+let chatMessages={}; // { "uid1_uid2": [{from,text,time}] }
+let searchQuery='';
+
+// Generate random ID — mixed letters + numbers, no fixed prefix
+function genUID(){
+    const chars='ABCDEFGHJKLMNPRSTUVWXYZ23456789'; // removed similar-looking: 0,O,1,I,Q
+    let id='';
+    for(let i=0;i<7;i++) id+=chars.charAt(Math.floor(Math.random()*chars.length));
+    return id;
+}
+
+// ---- USERS ----
+// roles: founder | admin | student
+// Fixed UIDs for default accounts so they survive page reloads
+let users=[
+    {id:1, username:'المؤسس', password:'founder123', role:'founder', approved:true, uid:'KR7M4NX'},
+    {id:2, username:'admin',  password:'admin123',   role:'admin',   approved:true, uid:'WT3P8LZ'}
+];
+let pendingUsers=[];
+let announcements=[];
+
+// ---- EVENTS ----
+let events={
+    regular:[], // فعاليات عادية: ألعاب، لعب مع الأصدقاء، مشاركة لقطات، جوائز
+    school:[]   // فعاليات مدرسية: من المدرسة
+};
+
+// ---- SUBJECTS ----
+const subjects=[
+    {id:1,name:'رياضيات',color:'from-blue-500 to-blue-700',icon:'📐',content:{lessons:[],units:[],assignments:[],projects:[],references:[],exams:[],links:[],videos:[],images:[],files:[]}},
+    {id:2,name:'علوم',color:'from-green-500 to-green-700',icon:'🔬',content:{lessons:[],units:[],assignments:[],projects:[],references:[],exams:[],links:[],videos:[],images:[],files:[]}},
+    {id:3,name:'لغتي',color:'from-amber-500 to-amber-700',icon:'📚',content:{lessons:[],units:[],assignments:[],projects:[],references:[],exams:[],links:[],videos:[],images:[],files:[]}},
+    {id:4,name:'إنجليزية',color:'from-red-500 to-red-700',icon:'🌍',content:{lessons:[],units:[],assignments:[],projects:[],references:[],exams:[],links:[],videos:[],images:[],files:[]}},
+    {id:5,name:'الدراسات الإسلامية',color:'from-emerald-500 to-emerald-700',icon:'☪️',content:{lessons:[],units:[],assignments:[],projects:[],references:[],exams:[],links:[],videos:[],images:[],files:[]}},
+    {id:6,name:'الدراسات الاجتماعية',color:'from-orange-500 to-orange-700',icon:'🌏',content:{lessons:[],units:[],assignments:[],projects:[],references:[],exams:[],links:[],videos:[],images:[],files:[]}},
+    {id:7,name:'الفنية',color:'from-pink-500 to-pink-700',icon:'🎨',content:{lessons:[],units:[],assignments:[],projects:[],references:[],exams:[],links:[],videos:[],images:[],files:[]}},
+    {id:8,name:'التربية البدنية',color:'from-teal-500 to-teal-700',icon:'⚽',content:{lessons:[],units:[],assignments:[],projects:[],references:[],exams:[],links:[],videos:[],images:[],files:[]}},
+    {id:9,name:'الحياتية',color:'from-purple-500 to-purple-700',icon:'🏃',content:{lessons:[],units:[],assignments:[],projects:[],references:[],exams:[],links:[],videos:[],images:[],files:[]}},
+    {id:10,name:'الرقمية',color:'from-cyan-500 to-cyan-700',icon:'💻',content:{lessons:[],units:[],assignments:[],projects:[],references:[],exams:[],links:[],videos:[],images:[],files:[]}},
+    {id:11,name:'النشاط',color:'from-yellow-500 to-yellow-700',icon:'🎭',content:{lessons:[],units:[],assignments:[],projects:[],references:[],exams:[],links:[],videos:[],images:[],files:[]}}
+];
+
+// ---- TIMETABLE: days x periods ----
+// 5 days (Sun-Thu), 7 periods
+let timetable = Array.from({length:5},()=>Array(7).fill(''));
+const days5=['الأحد','الإثنين','الثلاثاء','الأربعاء','الخميس'];
+const periods=['الأول','الثاني','الثالث','الرابع','الخامس','السادس','السابع'];
+
+// ---- EXAMS ----
+const examsData=[];
+// Calculate subject progress dynamically based on content
+function getSubjectProgress(subjectId){
+    const sub=subjects.find(s=>s.id===subjectId);
+    if(!sub)return 0;
+    
+    // Count all content items
+    const total=
+        sub.content.lessons.length +
+        sub.content.units.length +
+        sub.content.assignments.length +
+        sub.content.projects.length +
+        sub.content.references.length +
+        sub.content.exams.length +
+        sub.content.links.length +
+        sub.content.videos.length +
+        sub.content.images.length +
+        sub.content.files.length;
+    
+    // Calculate progress (each item = 1%, max 100%)
+    const progress=Math.min(total,100);
+    return progress;
+}
+
+// ===================== localStorage =====================
+function loadData(){
+    const g=(k)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch(e){return null;}};
+    if(g('q_users')){users=g('q_users');}
+    if(g('q_pending')) pendingUsers=g('q_pending');
+    if(g('q_ann'))     announcements=g('q_ann');
+    if(g('q_cur')){
+        const saved=g('q_cur');
+        // Re-sync from users array so any role/name changes are picked up
+        const fresh=users.find(u=>u.id===saved.id);
+        currentUser=fresh||saved;
+        currentView='home';
+    }
+    if(g('q_subj'))    {const l=g('q_subj'); subjects.forEach((s,i)=>{if(l[i])s.content=l[i].content;});}
+    if(g('q_ai'))      aiMessages=g('q_ai');
+    if(g('q_chat'))    chatMessages=g('q_chat');
+    if(g('q_tt'))      timetable=g('q_tt');
+}
+function saveData(){
+    localStorage.setItem('q_users',JSON.stringify(users));
+    localStorage.setItem('q_pending',JSON.stringify(pendingUsers));
+    localStorage.setItem('q_ann',JSON.stringify(announcements));
+    // Always re-sync currentUser from the users array before saving
+    if(currentUser){
+        const fresh=users.find(u=>u.id===currentUser.id);
+        if(fresh) currentUser=fresh;
+        localStorage.setItem('q_cur',JSON.stringify(currentUser));
+    } else {
+        localStorage.removeItem('q_cur');
+    }
+    localStorage.setItem('q_subj',JSON.stringify(subjects));
+    localStorage.setItem('q_ai',JSON.stringify(aiMessages));
+    localStorage.setItem('q_chat',JSON.stringify(chatMessages));
+    localStorage.setItem('q_tt',JSON.stringify(timetable));
+}
+
+// ===================== HELPERS =====================
+function calcGPA(){const d=examsData.filter(e=>e.status==='done');return d.length?(d.reduce((s,e)=>s+e.score,0)/d.length/25).toFixed(2):0;}
+function calcAvgScore(){const d=examsData.filter(e=>e.status==='done');return d.length?Math.round(d.reduce((s,e)=>s+e.score,0)/d.length):0;}
+function daysUntilExam(){const n=examsData.filter(e=>e.status==='upcoming').sort((a,b)=>new Date(a.date)-new Date(b.date))[0];return n?Math.ceil((new Date(n.date)-new Date())/86400000):'—';}
+
+// Get latest content item across all subjects and types
+function getLatestContent(){
+    let latest=null;
+    const typeLabels={
+        lessons:'📖 الدروس',
+        units:'📑 الوحدات',
+        assignments:'✏️ الواجبات',
+        projects:'🏗️ المشاريع',
+        references:'🔖 المراجعات',
+        exams:'📝 الاختبارات',
+        links:'🔗 الروابط',
+        videos:'🎬 الفيديوهات',
+        images:'🖼️ الصور',
+        files:'📁 الملفات'
+    };
+    subjects.forEach(sub=>{
+        Object.keys(sub.content).forEach(type=>{
+            sub.content[type].forEach(item=>{
+                if(!latest || item.id>latest.id){
+                    latest={...item, subjectName:sub.name, subjectIcon:sub.icon, typeLabel:typeLabels[type]||type, type};
+                }
+            });
+        });
+    });
+    return latest;
+}
+
+function chatKey(uid1,uid2){ return [uid1,uid2].sort().join('_'); }
+function isAdminOrFounder(){ return currentUser&&(currentUser.role==='admin'||currentUser.role==='founder'); }
+function isFounder(){ return currentUser&&currentUser.role==='founder'; }
+
+// ===================== AUTH =====================
+function handleLogin(e){
+    e.preventDefault();
+    const u=document.getElementById('login-username').value, p=document.getElementById('login-password').value;
+    const user=users.find(x=>x.username===u&&x.password===p&&x.approved);
+    if(user){currentUser=user;currentView='home';saveData();render();}
+    else alert('اسم المستخدم أو كلمة المرور غير صحيحة');
+}
+function handleRegister(e){
+    e.preventDefault();
+    const u=document.getElementById('register-username').value;
+    if(users.some(x=>x.username===u)||pendingUsers.some(x=>x.username===u)){alert('الاسم موجود');return;}
+    pendingUsers.push({id:Date.now(),username:u,password:'',role:'student',approved:false,uid:genUID()});
+    isRegistering=false; saveData(); alert('تم إرسال طلبك!'); render();
+}
+function approveUser(id){
+    const u=pendingUsers.find(x=>x.id===id); if(!u)return;
+    const pw=prompt('كلمة المرور:'); if(!pw||!pw.trim()){alert('يجب إدخال كلمة مرور');return;}
+    u.password=pw; users.push({...u,approved:true}); pendingUsers=pendingUsers.filter(x=>x.id!==id);
+    saveData(); alert(`قُبل: ${u.username}\nكلمة المرور: ${pw}\nالـ ID: ${u.uid}`); render();
+}
+function rejectUser(id){pendingUsers=pendingUsers.filter(x=>x.id!==id);saveData();render();}
+function handleLogout(){if(confirm('تسجيل الخروج؟')){currentUser=null;currentView='login';chatPartner=null;localStorage.removeItem('q_cur');render();}}
+
+// ===================== CONTENT =====================
+function addContent(sid,type,title,desc,url){const s=subjects.find(x=>x.id===sid);if(s&&title.trim()){s.content[type].push({id:Date.now(),title,description:desc,url});saveData();render();}}
+function showAddForm(key,sid){const t=prompt('العنوان:');if(!t||!t.trim())return;const d=prompt('الوصف (اختياري):') ||'';let u='';if(key==='links'||key==='videos')u=prompt('الرابط:')||'';addContent(sid,key,t,d,u);}
+function deleteContent(sid,type,itemId){if(confirm('حذف؟')){const s=subjects.find(x=>x.id===sid);if(s){s.content[type]=s.content[type].filter(i=>i.id!==itemId);saveData();render();}}}
+function editContent(sid,type,itemId){const s=subjects.find(x=>x.id===sid);if(!s)return;const item=s.content[type].find(i=>i.id===itemId);if(!item)return;const t=prompt('العنوان:',item.title);if(t===null)return;if(t.trim())item.title=t.trim();const d=prompt('الوصف:',item.description||'');if(d!==null)item.description=d;if(type==='links'||type==='videos'){const u=prompt('الرابط:',item.url||'');if(u!==null)item.url=u;}saveData();render();}
+function addAnnouncement(){const t=prompt('نص الإعلان:');if(t&&t.trim()){announcements.unshift({id:Date.now(),text:t,date:new Date().toLocaleDateString('ar-SA')});saveData();render();}}
+function deleteAnnouncement(id){if(confirm('حذف؟')){announcements=announcements.filter(a=>a.id!==id);saveData();render();}}
+
+// ===================== USER MANAGEMENT =====================
+function showUserPassword(id){const u=users.find(x=>x.id===id);if(u)alert(`الاسم: ${u.username}\nكلمة المرور: ${u.password}\nالـ ID: ${u.uid}`);}
+function deleteUser(id){const u=users.find(x=>x.id===id);if(u&&confirm(`حذف ${u.username}؟`)){users=users.filter(x=>x.id!==id);saveData();render();}}
+function editUsername(id){const u=users.find(x=>x.id===id);if(!u)return;const n=prompt('الاسم الجديد:',u.username);if(n&&n.trim()&&n!==u.username){if(users.some(x=>x.username===n&&x.id!==id)){alert('الاسم موجود');return;}u.username=n;saveData();render();}}
+function editPassword(id){const u=users.find(x=>x.id===id);if(!u)return;const p=prompt('كلمة المرور الجديدة:');if(p&&p.trim()){u.password=p;saveData();alert(`كلمة المرور الجديدة: ${p}`);render();}}
+// Change role (founder only)
+function changeRole(id){
+    const u=users.find(x=>x.id===id); if(!u)return;
+    const roles=['student','admin','founder'];
+    const current=roles.indexOf(u.role);
+    const choice=prompt(`الرتبة الحالية: ${u.role}\n\nالخيارات:\n1 - طالب\n2 - مشرف\n3 - مؤسس\n\nاختر رقم:`);
+    if(choice==='1'){u.role='student';}else if(choice==='2'){u.role='admin';}else if(choice==='3'){u.role='founder';}else{return;}
+    saveData(); alert(`تم تغيير رتبة ${u.username} إلى: ${u.role}`); render();
+}
+// Founder adds admin directly
+function founderAddAdmin(){
+    const name=prompt('اسم المشرف الجديد:');if(!name||!name.trim())return;
+    if(users.some(x=>x.username===name)){alert('الاسم موجود');return;}
+    const pw=prompt('كلمة المرور:');if(!pw||!pw.trim())return;
+    const uid=genUID();
+    users.push({id:Date.now(),username:name,password:pw,role:'admin',approved:true,uid});
+    saveData(); alert(`تم إضافة المشرف:\nالاسم: ${name}\nكلمة المرور: ${pw}\nالـ ID: ${uid}`); render();
+}
+
+// ===================== TIMETABLE =====================
+function editCell(day,period){
+    if(!isAdminOrFounder())return;
+    const current=timetable[day][period];
+    const options=subjects.map((s,i)=>`${i+1}. ${s.name}`).join('\n');
+    const choice=prompt(`اختر المادة:\n${options}\n\nأدخل رقم المادة (أو اخلِ فارغاً للحذف):`,current);
+    if(choice===null)return;
+    if(choice.trim()===''){timetable[day][period]='';saveData();render();return;}
+    const idx=parseInt(choice)-1;
+    if(idx>=0&&idx<subjects.length){timetable[day][period]=subjects[idx].name;saveData();render();}
+    else alert('رقم غير صحيح');
+}
+
+// ===================== AI =====================
+async function sendAiMessage(){
+    const input=document.getElementById('ai-input');const text=input.value.trim();if(!text||aiLoading)return;
+    input.value=''; aiMessages.push({role:'user',text,time:new Date().toLocaleTimeString('ar-SA',{hour:'2-digit',minute:'2-digit'})});
+    aiLoading=true; saveData(); render();
+    try{
+        const sys=currentUser&&currentUser.role!=='student'
+            ?'أنت مساعد تعليمي ذكي. تساعد المعلمين في تحضير الدروس وصياغة أسئلة. أجب بالعربية.'
+            :'أنت مساعد تعليمي ذكي. تساعد الطلاب السعوديين في شرح الدروس وحل المسائل. أجب بالعربية بوضوح.';
+        const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:sys,
+                messages:aiMessages.filter(m=>m.role==='user'||m.role==='assistant').map(m=>({role:m.role,content:m.text})),
+                tools:[{type:"web_search_20250305",name:"web_search"}]})});
+        const data=await res.json();
+        const reply=data.content.map(b=>b.type==='text'?b.text:'').filter(Boolean).join('\n')||'حدث خطأ.';
+        aiMessages.push({role:'assistant',text:reply,time:new Date().toLocaleTimeString('ar-SA',{hour:'2-digit',minute:'2-digit'})});
+    }catch(err){aiMessages.push({role:'assistant',text:'خطأ في الاتصال. حاول مرة أخرى.',time:new Date().toLocaleTimeString('ar-SA',{hour:'2-digit',minute:'2-digit'})});}
+    aiLoading=false; saveData(); render();
+    setTimeout(()=>{const inp=document.getElementById('ai-input');if(inp)inp.focus();},50);
+}
+function aiKeyDown(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendAiMessage();}}
+function clearAiChat(){if(confirm('حذف كل المحادثة؟')){aiMessages=[];saveData();render();}}
+
+// ===================== CHAT =====================
+function searchUser(){
+    const q=document.getElementById('chat-search').value.trim();
+    searchQuery=q; render();
+}
+function startChat(uid){
+    const partner=users.find(u=>u.uid===uid); if(!partner)return;
+    chatPartner=partner; currentView='chat'; render();
+}
+function sendChatMsg(){
+    if(!chatPartner)return;
+    const input=document.getElementById('chat-input');const text=input.value.trim();if(!text)return;
+    input.value='';
+    const key=chatKey(currentUser.uid,chatPartner.uid);
+    if(!chatMessages[key])chatMessages[key]=[];
+    chatMessages[key].push({id:Date.now(),from:currentUser.uid,text,time:new Date().toLocaleTimeString('ar-SA',{hour:'2-digit',minute:'2-digit'}),reactions:[]});
+    saveData(); render();
+    setTimeout(()=>{const c=document.getElementById('chat-msgs');if(c)c.scrollTop=c.scrollHeight;},50);
+}
+function chatKeyDown(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChatMsg();}}
+
+// ===================== EVENTS =====================
+function addRegularEvent(){
+    const types=['🎮 ألعاب','👥 لعب مع الأصدقاء','📸 مشاركة لقطات','🏆 فعالية بجوائز'];
+    const type=prompt('اختر نوع الفعالية:\n1 - '+types.join('\n2 - ').replace('2 - ','').replace('2 - ','3 - ').replace('3 - ','4 - '));
+    if(!type||type<1||type>4)return;
+    const title=prompt('عنوان الفعالية:');
+    if(!title)return;
+    const desc=prompt('وصف الفعالية:');
+    const prize=type==='4'?prompt('الجائزة (اختياري):'):'';
+    const maxPart=prompt('الحد الأقصى للمشاركين (اتركه فارغاً لبدون حد):');
+    events.regular.push({
+        id:Date.now(),
+        type:types[parseInt(type)-1],
+        title,
+        desc:desc||'',
+        prize:prize||'',
+        date:new Date().toLocaleDateString('ar-SA'),
+        maxParticipants:maxPart?parseInt(maxPart):null,
+        participants:[],
+        chat:[],
+        ratings:[],
+        screenshots:[]
+    });
+    saveData();render();
+}
+function addSchoolEvent(){
+    const title=prompt('عنوان الفعالية المدرسية:');
+    if(!title)return;
+    const desc=prompt('وصف الفعالية:');
+    const date=prompt('تاريخ الفعالية (مثال: 2026-03-15):');
+    const location=prompt('مكان الفعالية:');
+    const maxPart=prompt('الحد الأقصى للمشاركين (اتركه فارغاً لبدون حد):');
+    events.school.push({
+        id:Date.now(),
+        title,
+        desc:desc||'',
+        date:date||new Date().toLocaleDateString('ar-SA'),
+        location:location||'المدرسة',
+        organizer:currentUser.username,
+        maxParticipants:maxPart?parseInt(maxPart):null,
+        participants:[],
+        chat:[],
+        ratings:[]
+    });
+    saveData();render();
+}
+function editEvent(type,id){
+    const event=type==='regular'?events.regular.find(e=>e.id===id):events.school.find(e=>e.id===id);
+    if(!event)return;
+    const title=prompt('عنوان الفعالية:',event.title);
+    if(title)event.title=title;
+    const desc=prompt('وصف الفعالية:',event.desc);
+    if(desc!==null)event.desc=desc;
+    const maxPart=prompt('الحد الأقصى للمشاركين (حالي: '+(event.maxParticipants||'بدون حد')+'):');
+    if(maxPart!==null)event.maxParticipants=maxPart?parseInt(maxPart):null;
+    if(type==='school'){
+        const date=prompt('تاريخ الفعالية:',event.date);
+        if(date)event.date=date;
+        const location=prompt('مكان الفعالية:',event.location);
+        if(location)event.location=location;
+    }else{
+        const prize=prompt('الجائزة:',event.prize||'');
+        if(prize!==null)event.prize=prize;
+    }
+    saveData();render();
+}
+function deleteEvent(type,id){
+    if(!confirm('حذف الفعالية؟'))return;
+    if(type==='regular')events.regular=events.regular.filter(e=>e.id!==id);
+    else events.school=events.school.filter(e=>e.id!==id);
+    saveData();render();
+}
+function joinEvent(type,id){
+    const event=type==='regular'?events.regular.find(e=>e.id===id):events.school.find(e=>e.id===id);
+    if(!event)return;
+    if(event.participants.includes(currentUser.uid)){
+        alert('أنت مشترك بالفعل!');return;
+    }
+    if(event.maxParticipants&&event.participants.length>=event.maxParticipants){
+        alert('عذراً، الفعالية ممتلئة!');return;
+    }
+    event.participants.push(currentUser.uid);
+    saveData();render();
+}
+function sendEventChat(type,id){
+    const event=type==='regular'?events.regular.find(e=>e.id===id):events.school.find(e=>e.id===id);
+    if(!event)return;
+    const input=document.getElementById('event-chat-'+id);
+    const msg=input.value.trim();
+    if(!msg)return;
+    if(!event.chat)event.chat=[];
+    event.chat.push({
+        id:Date.now(),
+        user:currentUser.username,
+        uid:currentUser.uid,
+        msg,
+        time:new Date().toLocaleTimeString('ar-SA',{hour:'2-digit',minute:'2-digit'}),
+        image:null
+    });
+    input.value='';
+    saveData();render();
+    setTimeout(()=>{const c=document.getElementById('event-chat-msgs-'+id);if(c)c.scrollTop=c.scrollHeight;},50);
+}
+function sendEventImage(type,id){
+    const url=prompt('رابط الصورة:');
+    if(!url)return;
+    const event=type==='regular'?events.regular.find(e=>e.id===id):events.school.find(e=>e.id===id);
+    if(!event)return;
+    if(!event.chat)event.chat=[];
+    event.chat.push({
+        id:Date.now(),
+        user:currentUser.username,
+        uid:currentUser.uid,
+        msg:'',
+        time:new Date().toLocaleTimeString('ar-SA',{hour:'2-digit',minute:'2-digit'}),
+        image:url
+    });
+    saveData();render();
+}
+function rateEvent(type,id,stars){
+    const event=type==='regular'?events.regular.find(e=>e.id===id):events.school.find(e=>e.id===id);
+    if(!event)return;
+    if(!event.ratings)event.ratings=[];
+    const existing=event.ratings.find(r=>r.uid===currentUser.uid);
+    if(existing){
+        existing.stars=stars;
+    }else{
+        event.ratings.push({uid:currentUser.uid,user:currentUser.username,stars});
+    }
+    saveData();render();
+}
+function getEventRating(event){
+    if(!event.ratings||event.ratings.length===0)return 0;
+    const sum=event.ratings.reduce((a,r)=>a+r.stars,0);
+    return(sum/event.ratings.length).toFixed(1);
+}
+function shareScreenshot(id){
+    const url=prompt('رابط الصورة أو اللقطة:');
+    if(!url)return;
+    const event=events.regular.find(e=>e.id===id);
+    if(!event)return;
+    if(!event.screenshots)event.screenshots=[];
+    event.screenshots.push({user:currentUser.username,url,time:new Date().toLocaleTimeString('ar-SA')});
+    saveData();render();
+}
+function deleteChatMsg(msgId){
+    if(!confirm('حذف الرسالة؟'))return;
+    const key=chatKey(currentUser.uid,chatPartner.uid);
+    chatMessages[key]=chatMessages[key].filter(m=>m.id!==msgId);
+    saveData();render();
+}
+function editChatMsg(msgId){
+    const key=chatKey(currentUser.uid,chatPartner.uid);
+    const msg=chatMessages[key].find(m=>m.id===msgId);
+    if(!msg)return;
+    const newText=prompt('تعديل الرسالة:',msg.text);
+    if(newText===null||!newText.trim())return;
+    msg.text=newText.trim();
+    msg.edited=true;
+    saveData();render();
+}
+function addReaction(msgId){
+    const emoji=prompt('اختر إيموجي:\n❤️ 😂 😮 😢 😡 👍 👎 🔥 ⭐ 🎉\n\nأدخل الإيموجي:');
+    if(!emoji||!emoji.trim())return;
+    const key=chatKey(currentUser.uid,chatPartner.uid);
+    const msg=chatMessages[key].find(m=>m.id===msgId);
+    if(!msg)return;
+    if(!msg.reactions)msg.reactions=[];
+    // check if user already reacted
+    const existing=msg.reactions.find(r=>r.uid===currentUser.uid);
+    if(existing){existing.emoji=emoji.trim();}
+    else{msg.reactions.push({uid:currentUser.uid,emoji:emoji.trim()});}
+    saveData();render();
+}
+
+// ===================== RENDER =====================
+
+function renderLoginPage(){
+    return `<div class="min-h-screen flex items-center justify-center p-4" style="background:linear-gradient(135deg,#004d26,#006C35,#00A352)">
+        <div class="absolute inset-0 overflow-hidden"><div class="absolute -top-32 -right-32 w-96 h-96 bg-white rounded-full opacity-5"></div><div class="absolute -bottom-32 -left-32 w-96 h-96 bg-white rounded-full opacity-5"></div></div>
+        <div class="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-md relative z-10">
+            <div class="text-center mb-6">
+                <div class="w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg" style="background:linear-gradient(135deg,#006C35,#00A352)"><span class="text-4xl">🎓</span></div>
+                <h1 class="text-4xl font-bold" style="color:#006C35">منصة القادسية</h1>
+                <p class="text-gray-500">منصة تعليمية متكاملة</p>
+            </div>
+            ${!isRegistering?`
+            <form onsubmit="handleLogin(event)" class="space-y-4">
+                <div><label class="block text-gray-700 font-semibold mb-1 text-right">اسم المستخدم</label><input id="login-username" type="text" class="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-green-500 focus:outline-none text-right" required dir="rtl"></div>
+                <div><label class="block text-gray-700 font-semibold mb-1 text-right">كلمة المرور</label><input id="login-password" type="password" class="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-green-500 focus:outline-none text-right" required dir="rtl"></div>
+                <button type="submit" class="w-full text-white py-3 rounded-xl font-bold shadow" style="background:linear-gradient(135deg,#006C35,#00A352)">تسجيل الدخول</button>
+                <button type="button" onclick="isRegistering=true;render()" class="w-full bg-white border-2 border-green-600 text-green-700 py-3 rounded-xl font-bold">إنشاء حساب جديد</button>
+            </form>`:`
+            <form onsubmit="handleRegister(event)" class="space-y-4">
+                <div><label class="block text-gray-700 font-semibold mb-1 text-right">اسم المستخدم</label><input id="register-username" type="text" class="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-green-500 focus:outline-none text-right" required dir="rtl"></div>
+                <div class="bg-green-50 border-r-4 border-green-500 p-3 rounded-lg"><p class="text-sm text-green-800 text-right">سيتم مراجعة طلبك من قبل المشرف</p></div>
+                <button type="submit" class="w-full text-white py-3 rounded-xl font-bold shadow" style="background:linear-gradient(135deg,#006C35,#00A352)">إرسال الطلب</button>
+                <button type="button" onclick="isRegistering=false;render()" class="w-full bg-white border-2 border-gray-300 text-gray-600 py-3 rounded-xl font-bold">العودة</button>
+            </form>`}
+        </div>
+    </div>`;
+}
+
+function renderSidebar(){
+    const nav=[
+        {key:'home',icon:'🏠',label:'الصفحة الرئيسية'},
+        {key:'subjects',icon:'📚',label:'المواد الدراسية'},
+        {key:'timetable',icon:'📅',label:'الجدول الدراسي'},
+        {key:'ai',icon:'🤖',label:'المعلم الذكي'},
+        {key:'events',icon:'🎉',label:'الفعاليات'},
+        {key:'news',icon:'📰',label:'أخبار التعليم'},
+        {key:'chat',icon:'💬',label:'الدردشة'},
+        {key:'profile',icon:'👤',label:'الحساب الشخصي'},
+    ];
+    if(isAdminOrFounder()) nav.push({key:'admin',icon:'🛡️',label:'لوحة المشرف'});
+    if(isFounder())        nav.push({key:'founder',icon:'👑',label:'لوحة المؤسس'});
+
+    return `<div class="${sidebarOpen?'w-80':'w-20'} transition-all duration-300 flex flex-col shadow-2xl flex-shrink-0" style="min-height:100vh;background:#1a1f2e">
+        <!-- Header -->
+        <div class="p-5 flex items-center justify-between border-b" style="border-color:#2d3548">
+            ${sidebarOpen?`<div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg flex items-center justify-center text-2xl" style="background:#006C35">🎓</div>
+                <div class="text-right">
+                    <h2 class="text-white font-bold text-lg">القائمة</h2>
+                    <p class="text-gray-400 text-xs">منصة القادسية</p>
+                </div>
+            </div>`:''}
+            <button onclick="sidebarOpen=!sidebarOpen;render()" class="p-2 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-all">
+                ${sidebarOpen?'<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>':'<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>'}
+            </button>
+        </div>
+        
+        <!-- User info -->
+        ${sidebarOpen?`<div class="p-4 mx-3 mt-3 rounded-xl" style="background:#2d3548">
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center text-xl" style="background:linear-gradient(135deg,#006C35,#00A352);color:white">
+                    ${currentUser.username.charAt(0)}
+                </div>
+                <div class="flex-1 text-right min-w-0">
+                    <p class="text-white font-semibold truncate">${currentUser.username}</p>
+                    <p class="text-gray-400 text-xs">${currentUser.role==='founder'?'👑 مؤسس':currentUser.role==='admin'?'🛡️ مشرف':'👨‍🎓 طالب'}</p>
+                </div>
+            </div>
+        </div>`:''}
+        
+        <!-- Navigation -->
+        <nav class="flex-1 p-3 space-y-2 overflow-y-auto mt-2">
+            ${nav.map(item=>{
+                const isActive=currentView===item.key&&!selectedSubject;
+                return`<button onclick="currentView='${item.key}';selectedSubject=null;chatPartner=null;searchQuery='';render()" 
+                    class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive?'text-white shadow-lg':'text-gray-400 hover:text-white hover:bg-gray-700/50'}" 
+                    style="${isActive?'background:linear-gradient(135deg,#006C35,#00A352)':''}">
+                    <span class="text-xl flex-shrink-0">${item.icon}</span>
+                    ${sidebarOpen?`<span class="font-medium text-right">${item.label}</span>`:''}
+                </button>`;
+            }).join('')}
+        </nav>
+        
+        <!-- Logout -->
+        <div class="p-3 border-t" style="border-color:#2d3548">
+            <button onclick="handleLogout()" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-red-400 hover:text-white hover:bg-red-600/20">
+                <span class="text-xl">🚪</span>
+                ${sidebarOpen?'<span class="font-medium">تسجيل الخروج</span>':''}
+            </button>
+        </div>
+    </div>`;
+}
+
+// ---------- HOME ----------
+function renderHomePage(){
+    const latestItem=getLatestContent();
+    return `<div class="flex-1 p-6 overflow-auto"><div class="max-w-6xl mx-auto space-y-5">
+        <!-- banner -->
+        <div class="rounded-3xl p-8 text-white shadow-xl slide-up" style="background:linear-gradient(135deg,#004d26,#006C35,#00A352)">
+            <h1 class="text-4xl font-bold text-right">مرحباً بك ${currentUser.username}</h1>
+            <p class="text-green-200 text-lg text-right">منصة القادسية • السنة الدراسية 2025-2026</p>
+        </div>
+        <!-- stats -->
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+            ${(()=>{
+                const stats=[{label:'المواد المتاحة',value:subjects.length,icon:'📚'}];
+                if(isAdminOrFounder()) stats.push({label:'الطلاب',value:users.filter(u=>u.role==='student').length,icon:'👥'});
+                stats.push({label:'الإعلانات',value:announcements.length,icon:'📢'});
+                return stats;
+            })().map((s,i)=>`<div class="bg-white rounded-2xl shadow-md p-5 slide-up" style="animation-delay:${i*.08}s"><div class="flex items-center justify-between mb-1"><span class="text-2xl">${s.icon}</span><span class="text-xs text-gray-500 text-right">${s.label}</span></div><p class="text-3xl font-bold text-gray-800 text-right">${s.value}</p></div>`).join('')}
+        </div>
+        <!-- top subject + progress -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <!-- آخر محتوى تم إضافته -->
+            <div class="bg-white rounded-2xl shadow-md p-6 slide-up" style="animation-delay:.25s">
+                <h3 class="text-lg font-bold text-gray-800 mb-4 text-right">🆕 آخر محتوى تم إضافته</h3>
+                ${!latestItem?'<p class="text-gray-400 text-center py-6">لم يتم إضافة أي محتوى بعد</p>':`
+                <div class="flex items-center gap-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-5">
+                    <span class="text-5xl">${latestItem.subjectIcon}</span>
+                    <div class="flex-1 text-right">
+                        <p class="text-xl font-bold text-gray-800">${latestItem.title}</p>
+                        ${latestItem.description?`<p class="text-sm text-gray-600 mt-1">${latestItem.description}</p>`:''}
+                        <div class="mt-2 flex gap-2 justify-end flex-wrap">
+                            <span class="bg-indigo-100 text-indigo-700 text-xs px-2.5 py-0.5 rounded-full font-semibold">${latestItem.subjectName}</span>
+                            <span class="bg-purple-100 text-purple-700 text-xs px-2.5 py-0.5 rounded-full font-semibold">${latestItem.typeLabel}</span>
+                        </div>
+                        ${latestItem.url?`<a href="${latestItem.url}" target="_blank" class="text-blue-600 hover:text-blue-800 text-xs mt-2 inline-block">🔗 فتح الرابط</a>`:''}
+                    </div>
+                </div>`}
+            </div>
+            <!-- progress bars -->
+            <div class="bg-white rounded-2xl shadow-md p-6 slide-up" style="animation-delay:.3s">
+                <h3 class="text-lg font-bold text-gray-800 mb-4 text-right">📚 تقدم المواد</h3>
+                <div class="space-y-2.5">${subjects.slice(0,5).map(s=>{const p=getSubjectProgress(s.id);return`<div><div class="flex justify-between text-xs text-gray-500 mb-1"><span>${p}%</span><span>${s.name}</span></div><div class="progress-track h-2"><div class="progress-fill" style="width:${p}%"></div></div></div>`;}).join('')}</div>
+            </div>
+        </div>
+        <!-- announcements -->
+        <div class="bg-white rounded-2xl shadow-md p-6 slide-up" style="animation-delay:.35s">
+            <h3 class="text-lg font-bold text-gray-800 mb-3 text-right">📢 الإعلانات</h3>
+            <div class="space-y-2">${announcements.length===0?'<p class="text-gray-400 text-center py-3">لا إعلانات</p>':announcements.map(a=>`<div class="border-r-4 border-green-500 bg-green-50 p-3 rounded-lg"><p class="text-gray-800 text-right text-sm">${a.text}</p><p class="text-xs text-gray-500 text-right mt-0.5">${a.date}</p></div>`).join('')}</div>
+        </div>
+        <!-- quick links -->
+        <div class="grid grid-cols-3 gap-4">
+            ${[{v:'ai',i:'🤖',l:'المعلم الذكي',c:'from-indigo-500 to-indigo-600'},{v:'timetable',i:'📅',l:'الجدول',c:'from-green-500 to-green-600'},{v:'chat',i:'💬',l:'الدردشة',c:'from-blue-500 to-blue-600'}].map(x=>`<button onclick="currentView='${x.v}';render()" class="bg-gradient-to-br ${x.c} text-white rounded-2xl p-4 shadow-md hover:shadow-lg transform hover:scale-105 transition-all text-center"><span class="text-2xl">${x.i}</span><p class="font-bold text-sm mt-1">${x.l}</p></button>`).join('')}
+        </div>
+    </div></div>`;
+}
+
+// ---------- TIMETABLE ----------
+function renderTimetablePage(){
+    return `<div class="flex-1 p-6 overflow-auto"><div class="max-w-6xl mx-auto space-y-5">
+        <div class="flex items-center justify-between">
+            ${isAdminOrFounder()?'<button onclick="resetTimetable()" class="text-sm text-red-500 hover:text-red-700 font-semibold">🗑️ حذف الجدول</button>':'<div></div>'}
+            <h1 class="text-2xl font-bold text-gray-800 text-right slide-up">📅 الجدول الدراسي</h1>
+        </div>
+        ${isAdminOrFounder()?'<div class="bg-blue-50 border-r-4 border-blue-500 p-3 rounded-lg"><p class="text-sm text-blue-800 text-right">💡 اضغط على أي خانة لإضافة أو تعديل المادة</p></div>':''}
+        <div class="bg-white rounded-2xl shadow-xl p-6 slide-up" style="animation-delay:.1s">
+            <!-- School header -->
+            <div class="text-center mb-6 pb-4 border-b-2 border-green-600">
+                <h2 class="text-2xl font-bold mb-2" style="color:#006C35">جدول الحصص الدراسية</h2>
+                <p class="text-sm text-gray-600">العام الدراسي 2025-2026</p>
+            </div>
+            
+            <div class="overflow-x-auto">
+                <table class="timetable w-full border-collapse">
+                    <thead><tr>
+                        <th style="width:100px">الحصة</th>
+                        ${days5.map(d=>`<th>${d}</th>`).join('')}
+                    </tr></thead>
+                    <tbody>
+                        ${periods.map((p,pi)=>`<tr>
+                            <td>${p}</td>
+                            ${days5.map((_,di)=>{
+                                const lesson=timetable[di][pi];
+                                const clickable=isAdminOrFounder()?`onclick="editCell(${di},${pi})" class="cursor-pointer"`:'';
+                                return `<td ${clickable}>${lesson?`<div class="cell-lesson">${lesson}</div>`:`<span class="text-gray-300 text-xs">${isAdminOrFounder()?'+ إضافة':'—'}</span>`}</td>`;
+                            }).join('')}
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>
+            
+            ${isAdminOrFounder()?'<div class="mt-4 text-xs text-gray-500 text-right">💡 نصيحة: اختر رقم المادة من القائمة أو اخلِ الخانة فارغة للحذف</div>':''}
+        </div>
+    </div></div>`;
+}
+function resetTimetable(){if(confirm('حذف كل الجدول؟')){timetable=Array.from({length:5},()=>Array(7).fill(''));saveData();render();}}
+
+// ---------- AI ----------
+function renderAiPage(){
+    return `<div class="flex-1 flex flex-col" style="min-height:0">
+        <div class="p-4 border-b bg-white flex items-center justify-between flex-shrink-0">
+            <button onclick="clearAiChat()" class="text-sm text-red-500">🗑️ حذف</button>
+            <div class="text-right"><h2 class="text-xl font-bold text-gray-800">🤖 المعلم الذكي</h2><p class="text-xs text-gray-500">مدعوم بالذكاء الاصطناعي + البحث</p></div>
+        </div>
+        <div class="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50" id="ai-messages-container">
+            ${aiMessages.length===0?`<div class="text-center py-16"><span class="text-6xl">🤖</span><p class="text-gray-500 mt-3">كيف يمكنني مساعدتك؟</p></div>`:
+            aiMessages.map(m=>`<div class="flex ${m.role==='user'?'justify-start':'justify-end'} msg-in"><div class="max-w-[75%] rounded-2xl px-4 py-2.5 shadow-sm ${m.role==='user'?'bubble-user text-white rounded-tl-none':'bubble-ai text-gray-800 rounded-tr-none'}"><p class="text-right whitespace-pre-wrap text-sm">${m.text}</p><p class="text-xs mt-1 ${m.role==='user'?'text-green-200':'text-gray-400'} text-right">${m.time}</p></div></div>`).join('')}
+            ${aiLoading?'<div class="flex justify-end"><div class="bubble-ai rounded-2xl rounded-tr-none px-4 py-2.5"><span class="spin text-sm">⏳</span> يكتب...</div></div>':''}
+        </div>
+        <div class="p-4 bg-white border-t flex-shrink-0">
+            <div class="flex gap-2 items-end">
+                <textarea id="ai-input" onkeydown="aiKeyDown(event)" placeholder="اسأل أي سؤال دراسي..." dir="rtl" class="flex-1 px-4 py-2.5 rounded-xl border-2 border-gray-200 focus:border-green-500 focus:outline-none text-right resize-none text-sm" rows="2"></textarea>
+                <button onclick="sendAiMessage()" class="text-white px-4 py-2.5 rounded-xl font-bold shadow flex-shrink-0" style="background:linear-gradient(135deg,#006C35,#00A352)">إرسال</button>
+            </div>
+            <p class="text-xs text-gray-400 text-right mt-1">Enter للإرسال</p>
+        </div>
+    </div>`;
+}
+
+// ---------- EXAMS ----------
+function renderExamsPage(){
+    const upcoming=examsData.filter(e=>e.status==='upcoming').sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const done=examsData.filter(e=>e.status==='done');
+    const gpa=calcGPA(),avg=calcAvgScore(),gpaP=(gpa/4)*100;
+    return `<div class="flex-1 p-6 overflow-auto"><div class="max-w-5xl mx-auto space-y-5">
+        <h1 class="text-2xl font-bold text-gray-800 text-right slide-up">🎓 الاختبارات والنتائج</h1>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="bg-white rounded-2xl shadow-md p-5 flex flex-col items-center slide-up">
+                <div class="gpa-ring"><svg width="130" height="130" viewBox="0 0 130 130"><circle cx="65" cy="65" r="54" fill="none" stroke="#e2e8f0" stroke-width="11"/><circle cx="65" cy="65" r="54" fill="none" stroke="#006C35" stroke-width="11" stroke-dasharray="${2*Math.PI*54}" stroke-dashoffset="${2*Math.PI*54*(1-gpaP/100)}" stroke-linecap="round"/></svg><div class="val"><span class="text-2xl font-bold text-gray-800">${gpa}</span><span class="text-xs text-gray-500">GPA</span></div></div>
+            </div>
+            <div class="bg-white rounded-2xl shadow-md p-5 slide-up" style="animation-delay:.08s"><h4 class="text-xs text-gray-500 text-right mb-2">متوسط الدرجات</h4><p class="text-4xl font-bold text-right" style="color:#006C35">${avg}<span class="text-sm text-gray-400">/100</span></p><div class="progress-track h-2 mt-3"><div class="progress-fill" style="width:${avg}%"></div></div></div>
+            <div class="bg-white rounded-2xl shadow-md p-5 slide-up" style="animation-delay:.12s"><h4 class="text-xs text-gray-500 text-right mb-2">إحصائيات</h4><div class="space-y-1.5 text-right text-sm">${[['مكتملة',done.length],['قادمة',upcoming.length],['أعلى',done.length>0?Math.max(...done.map(e=>e.score))+'%':'—'],['أدنى',done.length>0?Math.min(...done.map(e=>e.score))+'%':'—']].map(([l,v])=>`<div class="flex justify-between"><span class="text-gray-500">${l}</span><span class="font-bold text-gray-700">${v}</span></div>`).join('')}</div></div>
+        </div>
+        <div class="bg-white rounded-2xl shadow-md p-5 slide-up" style="animation-delay:.18s">
+            <h3 class="text-lg font-bold text-gray-800 mb-3 text-right">📅 القادمة</h3>
+            <div class="space-y-2">${upcoming.length===0?'<p class="text-gray-400 text-center py-4 text-sm">لا توجد اختبارات قادمة</p>':upcoming.map(ex=>{const days=Math.ceil((new Date(ex.date)-new Date())/86400000);return`<div class="flex items-center justify-between bg-red-50 border border-red-200 rounded-xl p-3"><div class="flex items-center gap-2"><span class="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">${days}أيام</span></div><div class="text-right"><p class="font-bold text-gray-800 text-sm">${ex.subject}</p><p class="text-xs text-gray-500">${new Date(ex.date).toLocaleDateString('ar-SA')} • ${ex.time}</p></div></div>`;}).join('')}</div>
+        </div>
+        <div class="bg-white rounded-2xl shadow-md p-5 slide-up" style="animation-delay:.22s">
+            <h3 class="text-lg font-bold text-gray-800 mb-3 text-right">📊 النتائج</h3>
+            <div class="space-y-2">${done.length===0?'<p class="text-gray-400 text-center py-4 text-sm">لا توجد نتائج بعد</p>':done.map(ex=>{const c=ex.score>=90?'emerald':ex.score>=70?'blue':'red';return`<div class="flex items-center justify-between bg-${c}-50 border border-${c}-200 rounded-xl p-3"><div class="flex items-center gap-2"><span class="font-bold text-lg text-${c}-600">${ex.score}%</span><div class="w-20 progress-track h-1.5"><div class="progress-fill" style="width:${ex.score}%"></div></div></div><div class="text-right"><p class="font-bold text-gray-800 text-sm">${ex.subject}</p><p class="text-xs text-gray-500">${new Date(ex.date).toLocaleDateString('ar-SA')}</p></div></div>`;}).join('')}</div>
+        </div>
+    </div></div>`;
+}
+
+// ---------- NEWS ----------
+function renderNewsPage(){
+    const news=[];
+    const cc={'قرارات وزارية':'bg-blue-100 text-blue-700','التقويم':'bg-green-100 text-green-700','تنبيهات':'bg-red-100 text-red-700','أخبار':'bg-purple-100 text-purple-700'};
+    return `<div class="flex-1 p-6 overflow-auto"><div class="max-w-3xl mx-auto space-y-4">
+        <h1 class="text-2xl font-bold text-gray-800 text-right slide-up">📰 أخبار التعليم</h1>
+        ${news.length===0?'<div class="text-center py-16"><span class="text-6xl">📰</span><p class="text-gray-500 mt-4 text-lg">لا توجد أخبار حالياً</p><p class="text-gray-400 text-sm mt-2">سيتم إضافة الأخبار التعليمية قريباً</p></div>':
+        news.map((n,i)=>`<div class="bg-white rounded-2xl shadow-md p-5 slide-up" style="animation-delay:${i*.07}s"><div class="flex items-start gap-3"><div class="flex-1"><div class="flex items-center justify-between mb-1 flex-wrap gap-1"><span class="text-xs ${cc[n.cat]||'bg-gray-100 text-gray-600'} px-2 py-0.5 rounded-full">${n.cat}</span><span class="text-xs text-gray-400">${new Date(n.date).toLocaleDateString('ar-SA')}</span></div><h3 class="font-bold text-gray-800 text-right">${n.title}</h3><p class="text-gray-500 text-xs text-right mt-1">${n.desc}</p></div><span class="text-2xl">${n.icon}</span></div></div>`).join('')}
+    </div></div>`;
+}
+
+// ---------- EVENTS ----------
+let eventTab='regular'; // regular or school
+function renderEventsPage(){
+    return `<div class="flex-1 p-6 overflow-auto"><div class="max-w-5xl mx-auto space-y-5">
+        <div class="flex items-center justify-between">
+            ${isAdminOrFounder()?`<div class="flex gap-2">
+                <button onclick="addRegularEvent()" class="px-4 py-2 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-xl text-sm font-semibold hover:shadow-lg transition-all">+ فعالية عادية</button>
+                <button onclick="addSchoolEvent()" class="px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl text-sm font-semibold hover:shadow-lg transition-all">+ فعالية مدرسية</button>
+            </div>`:'<div></div>'}
+            <h1 class="text-2xl font-bold text-gray-800 slide-up">🎉 الفعاليات</h1>
+        </div>
+        
+        <!-- Tabs -->
+        <div class="flex gap-3 bg-white rounded-xl p-2 shadow-md">
+            <button onclick="eventTab='regular';render()" class="flex-1 py-2.5 rounded-lg font-semibold transition-all ${eventTab==='regular'?'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow':'text-gray-600 hover:bg-gray-100'}">
+                🎮 الفعاليات العادية (${events.regular.length})
+            </button>
+            <button onclick="eventTab='school';render()" class="flex-1 py-2.5 rounded-lg font-semibold transition-all ${eventTab==='school'?'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow':'text-gray-600 hover:bg-gray-100'}">
+                🏫 الفعاليات المدرسية (${events.school.length})
+            </button>
+        </div>
+        
+        <!-- Regular Events -->
+        ${eventTab==='regular'?`
+            <div class="space-y-6">
+                ${events.regular.length===0?`<div class="text-center py-16 bg-white rounded-2xl shadow-md">
+                    <span class="text-6xl">🎮</span>
+                    <p class="text-gray-500 mt-4 text-lg">لا توجد فعاليات عادية</p>
+                    <p class="text-gray-400 text-sm mt-2">الفعاليات العادية تشمل: الألعاب، اللعب مع الأصدقاء، مشاركة اللقطات، والفعاليات بجوائز</p>
+                </div>`:events.regular.map((e,i)=>{
+                    const rating=getEventRating(e);
+                    const userRating=e.ratings?.find(r=>r.uid===currentUser.uid)?.stars||0;
+                    const isFull=e.maxParticipants&&e.participants.length>=e.maxParticipants;
+                    return`<div class="bg-white rounded-2xl shadow-md overflow-hidden slide-up" style="animation-delay:${i*.05}s">
+                        <!-- Header -->
+                        <div class="p-6 pb-4">
+                            <div class="flex items-start justify-between mb-3">
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-2 flex-wrap mb-2">
+                                        <span class="px-3 py-1 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full">${e.type}</span>
+                                        <span class="text-xs text-gray-400">${e.date}</span>
+                                        ${e.maxParticipants?`<span class="px-2 py-1 ${isFull?'bg-red-100 text-red-600':'bg-blue-100 text-blue-600'} text-xs rounded-full">${e.participants.length}/${e.maxParticipants} ${isFull?'(ممتلئة)':''}</span>`:`<span class="text-xs text-gray-500">👥 ${e.participants.length}</span>`}
+                                    </div>
+                                    <h3 class="text-xl font-bold text-gray-800 text-right">${e.title}</h3>
+                                    ${e.desc?`<p class="text-gray-600 text-sm text-right mt-2">${e.desc}</p>`:''}
+                                    ${e.prize?`<div class="mt-3 p-3 bg-yellow-50 border-r-4 border-yellow-400 rounded-lg">
+                                        <p class="text-sm font-semibold text-yellow-700">🏆 الجائزة: ${e.prize}</p>
+                                    </div>`:''}
+                                    
+                                    <!-- Rating Display -->
+                                    <div class="flex items-center gap-2 mt-3">
+                                        <div class="flex gap-1">
+                                            ${[1,2,3,4,5].map(s=>`<span class="text-lg">${s<=Math.round(rating)?'⭐':'☆'}</span>`).join('')}
+                                        </div>
+                                        <span class="text-sm text-gray-600">${rating>0?rating+' من 5':' لا توجد تقييمات'}</span>
+                                        ${e.ratings?.length>0?`<span class="text-xs text-gray-400">(${e.ratings.length} تقييم)</span>`:''}
+                                    </div>
+                                </div>
+                                <div class="flex gap-1">
+                                    ${isAdminOrFounder()?`
+                                        <button onclick="editEvent('regular',${e.id})" class="text-blue-500 hover:text-blue-700 p-2" title="تعديل">✏️</button>
+                                        <button onclick="deleteEvent('regular',${e.id})" class="text-red-500 hover:text-red-700 p-2" title="حذف">🗑️</button>
+                                    `:''}
+                                </div>
+                            </div>
+                            
+                            <!-- Join Button -->
+                            ${!e.participants.includes(currentUser.uid)?`
+                                <button onclick="joinEvent('regular',${e.id})" class="w-full px-4 py-2.5 ${isFull?'bg-gray-300 cursor-not-allowed':'bg-green-500 hover:bg-green-600'} text-white rounded-lg font-semibold transition-all" ${isFull?'disabled':''}>
+                                    ${isFull?'🔒 الفعالية ممتلئة':'✓ انضمام للفعالية'}
+                                </button>
+                            `:`<div class="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+                                <span class="text-green-700 font-semibold">✓ أنت مشترك في هذه الفعالية</span>
+                            </div>`}
+                        </div>
+                        
+                        <!-- Chat Section (only for participants) -->
+                        ${e.participants.includes(currentUser.uid)?`
+                            <div class="border-t border-gray-100 bg-gray-50 p-4">
+                                <h4 class="font-semibold text-gray-800 mb-3 text-right">💬 دردشة الفعالية</h4>
+                                <div class="bg-white rounded-lg p-3 mb-3 max-h-60 overflow-y-auto space-y-2" id="event-chat-msgs-${e.id}">
+                                    ${!e.chat||e.chat.length===0?`<p class="text-gray-400 text-sm text-center">لا توجد رسائل بعد</p>`:
+                                    e.chat.map(m=>{
+                                        const isMe=m.uid===currentUser.uid;
+                                        return`<div class="flex ${isMe?'justify-end':'justify-start'}">
+                                            <div class="max-w-[75%] ${isMe?'bg-green-100':'bg-gray-100'} rounded-lg px-3 py-2">
+                                                <p class="text-xs font-semibold ${isMe?'text-green-700':'text-gray-700'} mb-1">${m.user}</p>
+                                                ${m.image?`<img src="${m.image}" class="rounded-lg max-w-full mb-1" style="max-height:200px">`:''}
+                                                ${m.msg?`<p class="text-sm text-gray-800">${m.msg}</p>`:''}
+                                                <p class="text-xs text-gray-400 mt-1">${m.time}</p>
+                                            </div>
+                                        </div>`;
+                                    }).join('')}
+                                </div>
+                                <div class="flex gap-2">
+                                    <button onclick="sendEventImage('regular',${e.id})" class="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm">📷</button>
+                                    <input id="event-chat-${e.id}" type="text" placeholder="اكتب رسالة..." class="flex-1 px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:border-green-500 text-sm">
+                                    <button onclick="sendEventChat('regular',${e.id})" class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-semibold text-sm">إرسال</button>
+                                </div>
+                            </div>
+                            
+                            <!-- Rating Section -->
+                            <div class="border-t border-gray-100 p-4 bg-gray-50">
+                                <h4 class="font-semibold text-gray-800 mb-2 text-right">⭐ قيّم الفعالية</h4>
+                                <div class="flex justify-center gap-2">
+                                    ${[1,2,3,4,5].map(s=>`<button onclick="rateEvent('regular',${e.id},${s})" class="text-3xl hover:scale-110 transition-transform" title="${s} نجوم">${s<=userRating?'⭐':'☆'}</button>`).join('')}
+                                </div>
+                                ${userRating>0?`<p class="text-xs text-center text-gray-500 mt-2">تقييمك: ${userRating} نجوم</p>`:''}
+                            </div>
+                        `:''}
+                    </div>`;
+                }).join('')}
+            </div>
+        `:''}
+        
+        <!-- School Events -->
+        ${eventTab==='school'?`
+            <div class="space-y-6">
+                ${events.school.length===0?`<div class="text-center py-16 bg-white rounded-2xl shadow-md">
+                    <span class="text-6xl">🏫</span>
+                    <p class="text-gray-500 mt-4 text-lg">لا توجد فعاليات مدرسية</p>
+                    <p class="text-gray-400 text-sm mt-2">سيتم إضافة الفعاليات المدرسية من قبل المشرفين</p>
+                </div>`:events.school.map((e,i)=>{
+                    const rating=getEventRating(e);
+                    const userRating=e.ratings?.find(r=>r.uid===currentUser.uid)?.stars||0;
+                    const isFull=e.maxParticipants&&e.participants.length>=e.maxParticipants;
+                    return`<div class="bg-white rounded-2xl shadow-md overflow-hidden slide-up" style="animation-delay:${i*.05}s">
+                        <!-- Header -->
+                        <div class="p-6 pb-4">
+                            <div class="flex items-start justify-between mb-3">
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-2 flex-wrap mb-2">
+                                        <span class="px-3 py-1 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">🏫 مدرسية</span>
+                                        <span class="text-xs text-gray-400">📅 ${e.date}</span>
+                                        <span class="text-xs text-gray-400">📍 ${e.location}</span>
+                                        ${e.maxParticipants?`<span class="px-2 py-1 ${isFull?'bg-red-100 text-red-600':'bg-blue-100 text-blue-600'} text-xs rounded-full">${e.participants.length}/${e.maxParticipants}</span>`:`<span class="text-xs text-gray-500">👥 ${e.participants.length}</span>`}
+                                    </div>
+                                    <h3 class="text-xl font-bold text-gray-800 text-right">${e.title}</h3>
+                                    ${e.desc?`<p class="text-gray-600 text-sm text-right mt-2">${e.desc}</p>`:''}
+                                    <p class="text-xs text-gray-500 mt-3">المنظم: ${e.organizer}</p>
+                                    
+                                    <!-- Rating Display -->
+                                    <div class="flex items-center gap-2 mt-3">
+                                        <div class="flex gap-1">
+                                            ${[1,2,3,4,5].map(s=>`<span class="text-lg">${s<=Math.round(rating)?'⭐':'☆'}</span>`).join('')}
+                                        </div>
+                                        <span class="text-sm text-gray-600">${rating>0?rating+' من 5':'لا توجد تقييمات'}</span>
+                                    </div>
+                                </div>
+                                <div class="flex gap-1">
+                                    ${isAdminOrFounder()?`
+                                        <button onclick="editEvent('school',${e.id})" class="text-blue-500 hover:text-blue-700 p-2" title="تعديل">✏️</button>
+                                        <button onclick="deleteEvent('school',${e.id})" class="text-red-500 hover:text-red-700 p-2" title="حذف">🗑️</button>
+                                    `:''}
+                                </div>
+                            </div>
+                            
+                            <!-- Join Button -->
+                            ${!e.participants.includes(currentUser.uid)?`
+                                <button onclick="joinEvent('school',${e.id})" class="w-full px-4 py-2.5 ${isFull?'bg-gray-300 cursor-not-allowed':'bg-blue-500 hover:bg-blue-600'} text-white rounded-lg font-semibold transition-all" ${isFull?'disabled':''}>
+                                    ${isFull?'🔒 الفعالية ممتلئة':'✓ انضمام للفعالية'}
+                                </button>
+                            `:`<div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center">
+                                <span class="text-blue-700 font-semibold">✓ أنت مشترك في هذه الفعالية</span>
+                            </div>`}
+                        </div>
+                        
+                        <!-- Chat Section -->
+                        ${e.participants.includes(currentUser.uid)?`
+                            <div class="border-t border-gray-100 bg-gray-50 p-4">
+                                <h4 class="font-semibold text-gray-800 mb-3 text-right">💬 دردشة الفعالية</h4>
+                                <div class="bg-white rounded-lg p-3 mb-3 max-h-60 overflow-y-auto space-y-2" id="event-chat-msgs-${e.id}">
+                                    ${!e.chat||e.chat.length===0?`<p class="text-gray-400 text-sm text-center">لا توجد رسائل بعد</p>`:
+                                    e.chat.map(m=>{
+                                        const isMe=m.uid===currentUser.uid;
+                                        return`<div class="flex ${isMe?'justify-end':'justify-start'}">
+                                            <div class="max-w-[75%] ${isMe?'bg-blue-100':'bg-gray-100'} rounded-lg px-3 py-2">
+                                                <p class="text-xs font-semibold ${isMe?'text-blue-700':'text-gray-700'} mb-1">${m.user}</p>
+                                                ${m.image?`<img src="${m.image}" class="rounded-lg max-w-full mb-1" style="max-height:200px">`:''}
+                                                ${m.msg?`<p class="text-sm text-gray-800">${m.msg}</p>`:''}
+                                                <p class="text-xs text-gray-400 mt-1">${m.time}</p>
+                                            </div>
+                                        </div>`;
+                                    }).join('')}
+                                </div>
+                                <div class="flex gap-2">
+                                    <button onclick="sendEventImage('school',${e.id})" class="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm">📷</button>
+                                    <input id="event-chat-${e.id}" type="text" placeholder="اكتب رسالة..." class="flex-1 px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:border-blue-500 text-sm">
+                                    <button onclick="sendEventChat('school',${e.id})" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-semibold text-sm">إرسال</button>
+                                </div>
+                            </div>
+                            
+                            <!-- Rating Section -->
+                            <div class="border-t border-gray-100 p-4 bg-gray-50">
+                                <h4 class="font-semibold text-gray-800 mb-2 text-right">⭐ قيّم الفعالية</h4>
+                                <div class="flex justify-center gap-2">
+                                    ${[1,2,3,4,5].map(s=>`<button onclick="rateEvent('school',${e.id},${s})" class="text-3xl hover:scale-110 transition-transform" title="${s} نجوم">${s<=userRating?'⭐':'☆'}</button>`).join('')}
+                                </div>
+                                ${userRating>0?`<p class="text-xs text-center text-gray-500 mt-2">تقييمك: ${userRating} نجوم</p>`:''}
+                            </div>
+                        `:''}
+                    </div>`;
+                }).join('')}
+            </div>
+        `:''}
+    </div></div>`;
+}
+
+// ---------- SUBJECTS ----------
+function renderSubjectsPage(){
+    return `<div class="flex-1 p-6 overflow-auto"><div class="max-w-6xl mx-auto">
+        <h1 class="text-2xl font-bold text-gray-800 mb-5 text-right slide-up">📚 المواد الدراسية</h1>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            ${subjects.map((s,i)=>{const p=getSubjectProgress(s.id);return`<div onclick="selectedSubject=${s.id};render()" class="slide-up bg-white rounded-2xl shadow-md hover:shadow-lg transform hover:scale-105 transition-all cursor-pointer overflow-hidden" style="animation-delay:${i*.06}s"><div class="bg-gradient-to-br ${s.color} p-5 text-center"><span class="text-4xl">${s.icon}</span><h3 class="text-lg font-bold text-white mt-1">${s.name}</h3></div><div class="p-3"><div class="flex justify-between text-xs text-gray-500 mb-1"><span>${p}%</span><span>التقدم</span></div><div class="progress-track h-2"><div class="progress-fill" style="width:${p}%"></div></div></div></div>`;}).join('')}
+        </div>
+    </div></div>`;
+}
+
+function renderSubjectDetail(){
+    const sub=subjects.find(s=>s.id===selectedSubject); if(!sub)return'';
+    const sections=[{key:'lessons',title:'الدروس',icon:'📖'},{key:'units',title:'الوحدات',icon:'📑'},{key:'assignments',title:'الواجبات',icon:'✏️'},{key:'projects',title:'المشاريع',icon:'🏗️'},{key:'references',title:'المراجعات',icon:'🔖'},{key:'exams',title:'الاختبارات',icon:'📝'},{key:'links',title:'الروابط',icon:'🔗'},{key:'videos',title:'الفيديوهات',icon:'🎬'},{key:'images',title:'الصور',icon:'🖼️'},{key:'files',title:'الملفات',icon:'📁'}];
+    return `<div class="flex-1 p-6 overflow-auto"><div class="max-w-6xl mx-auto">
+        <button onclick="selectedSubject=null;render()" class="mb-3 text-sm font-semibold text-gray-500 hover:text-gray-800">← العودة</button>
+        <div class="bg-gradient-to-br ${sub.color} rounded-2xl p-6 text-white text-center shadow-xl mb-5 slide-up"><span class="text-6xl">${sub.icon}</span><h1 class="text-3xl font-bold mt-1">${sub.name}</h1></div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            ${sections.map((sec,i)=>`<div class="bg-white rounded-2xl shadow-md p-4 slide-up" style="animation-delay:${i*.04}s">
+                <div class="flex items-center justify-between mb-2"><span class="text-lg">${sec.icon}</span><h3 class="font-bold text-gray-800 text-right text-sm">${sec.title}</h3></div>
+                <div class="space-y-1.5 mb-2">${sub.content[sec.key].length===0?'<p class="text-gray-400 text-xs text-right italic">لا محتوى بعد</p>':sub.content[sec.key].map(item=>`<div class="bg-gray-50 border border-gray-200 rounded-lg p-2.5"><div class="flex justify-between items-start gap-1.5"><div class="flex-1"><p class="font-semibold text-gray-800 text-right text-xs">${item.title}</p>${item.description?`<p class="text-gray-500 text-xs text-right">${item.description}</p>`:''}</div>${isAdminOrFounder()?`<div class="flex gap-1"><button onclick="editContent(${sub.id},'${sec.key}',${item.id})" class="bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded text-xs">✏️</button><button onclick="deleteContent(${sub.id},'${sec.key}',${item.id})" class="bg-red-100 text-red-600 px-1.5 py-0.5 rounded text-xs">🗑️</button></div>`:''}</div></div>`).join('')}</div>
+                ${isAdminOrFounder()?`<button onclick="showAddForm('${sec.key}',${sub.id})" class="w-full text-white py-1.5 rounded-lg text-xs font-bold mt-1" style="background:linear-gradient(135deg,#006C35,#00A352)">+ إضافة</button>`:''}</div>`).join('')}
+        </div>
+    </div></div>`;
+}
+
+// ---------- CHAT ----------
+function renderChatPage(){
+    if(chatPartner){
+        const key=chatKey(currentUser.uid,chatPartner.uid);
+        const msgs=chatMessages[key]||[];
+        return `<div class="flex-1 flex flex-col" style="min-height:0;background:#efeae2">
+            <!-- WhatsApp-style header -->
+            <div class="px-4 py-3 flex items-center gap-3 shadow-md" style="background:#075E54">
+                <button onclick="chatPartner=null;render()" class="text-white hover:bg-white/20 rounded-full p-2 transition-all">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                </button>
+                <div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-lg flex-shrink-0">
+                    ${chatPartner.username.charAt(0)}
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p class="font-semibold text-white truncate">${chatPartner.username}</p>
+                    <p class="text-xs text-green-200">متصل</p>
+                </div>
+                <button class="text-white p-2 hover:bg-white/20 rounded-full">⋮</button>
+            </div>
+            
+            <!-- Messages area with WhatsApp pattern -->
+            <div class="flex-1 overflow-y-auto p-4 space-y-2" id="chat-msgs" style="background-image:url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZGVmcz48cGF0dGVybiBpZD0icGF0dGVybiIgeD0iMCIgeT0iMCIgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMDAiIHBhdHRlcm5Vbml0cz0idXNlclNwYWNlT25Vc2UiPjxwYXRoIGQ9Ik0yMCw0MCBMNDAsNjAgTDYwLDQwIiBzdHJva2U9IiNkOWQ5ZDkiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgb3BhY2l0eT0iMC4xIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI3BhdHRlcm4pIi8+PC9zdmc+');background-color:#efeae2">
+                ${msgs.length===0?`<div class="text-center py-16">
+                    <div class="bg-white/60 rounded-lg p-4 inline-block">
+                        <p class="text-gray-600 text-sm">🔒 الرسائل محمية بالتشفير من الطرفين</p>
+                    </div>
+                </div>`:msgs.map((m,i)=>{
+                    const isMe=m.from===currentUser.uid;
+                    const reactions=(m.reactions||[]).map(r=>`${r.emoji}`).join(' ');
+                    const showTime=i===0||msgs[i-1]?.time!==m.time;
+                    return`${showTime?`<div class="text-center my-2"><span class="bg-white/80 text-gray-600 text-xs px-3 py-1 rounded-full shadow-sm">${m.time}</span></div>`:''}
+                    <div class="flex ${isMe?'justify-end':'justify-start'} msg-in group">
+                        <div class="max-w-[75%] relative">
+                            <div class="rounded-lg px-3 py-2 shadow-md relative ${isMe?'bg-green-100 rounded-br-none':'bg-white rounded-bl-none'}" style="position:relative">
+                                ${isMe?`<div class="absolute -left-2 bottom-0 hidden group-hover:flex flex-col gap-1 bg-white rounded-lg shadow-lg p-1 z-10">
+                                    <button onclick="editChatMsg(${m.id})" class="hover:bg-gray-100 p-1.5 rounded text-xs whitespace-nowrap flex items-center gap-1" title="تعديل">
+                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                                        تعديل
+                                    </button>
+                                    <button onclick="deleteChatMsg(${m.id})" class="hover:bg-gray-100 p-1.5 rounded text-xs whitespace-nowrap flex items-center gap-1 text-red-600" title="حذف">
+                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                        حذف
+                                    </button>
+                                </div>`:''}
+                                <button onclick="addReaction(${m.id})" class="absolute ${isMe?'-left-8':'right-2'} top-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white rounded-full p-1 shadow-md hover:bg-gray-50" title="تفاعل">
+                                    <span class="text-sm">❤️</span>
+                                </button>
+                                <p class="text-sm text-gray-800 break-words" style="word-wrap:break-word;white-space:pre-wrap">${m.text}</p>
+                                <div class="flex items-center justify-end gap-1 mt-1">
+                                    ${m.edited?'<span class="text-xs text-gray-500">معدّلة</span>':''}
+                                    <span class="text-xs ${isMe?'text-gray-600':'text-gray-400'}">${m.time.split(':').slice(0,2).join(':')}</span>
+                                    ${isMe?`<svg class="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 20 20"><path d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"/></svg>`:''}
+                                </div>
+                            </div>
+                            ${reactions?`<div class="flex gap-1 mt-1 ${isMe?'justify-end':'justify-start'}">${reactions.split(' ').map(e=>`<span class="bg-white rounded-full px-2 py-0.5 text-xs shadow-sm">${e}</span>`).join('')}</div>`:''}
+                        </div>
+                    </div>`;
+                }).join('')}
+            </div>
+            
+            <!-- WhatsApp-style input -->
+            <div class="p-2 bg-gray-100 flex items-center gap-2 flex-shrink-0">
+                <button class="text-gray-600 hover:text-gray-800 p-2 hover:bg-gray-200 rounded-full transition-all">😊</button>
+                <button class="text-gray-600 hover:text-gray-800 p-2 hover:bg-gray-200 rounded-full transition-all">📎</button>
+                <input id="chat-input" type="text" onkeydown="chatKeyDown(event)" placeholder="اكتب رسالة" class="flex-1 px-4 py-2.5 rounded-full border-none focus:outline-none text-sm bg-white" style="box-shadow:0 1px 2px rgba(0,0,0,0.1)">
+                <button onclick="sendChatMsg()" class="p-3 rounded-full text-white hover:opacity-90 transition-all" style="background:#25D366">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+                </button>
+            </div>
+        </div>`;
+    }
+    
+    // Chat list (WhatsApp style)
+    const allUsers=users.filter(u=>u.uid!==currentUser.uid&&u.approved);
+    const filtered=searchQuery?allUsers.filter(u=>u.uid.toUpperCase().includes(searchQuery.toUpperCase())||u.username.includes(searchQuery)):[];
+    const recentKeys=Object.keys(chatMessages).filter(k=>k.includes(currentUser.uid)&&chatMessages[k].length>0);
+    const recentPartners=recentKeys.map(k=>{const otherUid=k.split('_').find(id=>id!==currentUser.uid);return users.find(u=>u.uid===otherUid);}).filter(Boolean);
+
+    return `<div class="flex-1 flex flex-col" style="min-height:0;background:#fff">
+        <!-- WhatsApp header -->
+        <div class="px-4 py-4 flex items-center justify-between shadow-sm" style="background:#075E54">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-lg">
+                    ${currentUser.username.charAt(0)}
+                </div>
+                <h1 class="text-xl font-semibold text-white">الدردشات</h1>
+            </div>
+            <button class="text-white p-2 hover:bg-white/20 rounded-full">⋮</button>
+        </div>
+        
+        <!-- Search bar -->
+        <div class="px-3 py-2 bg-gray-100">
+            <div class="flex items-center gap-2 bg-white rounded-lg px-3 py-2 shadow-sm">
+                <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                <input id="chat-search" type="text" oninput="searchUser()" placeholder="ابحث أو ابدأ محادثة جديدة" class="flex-1 outline-none text-sm">
+            </div>
+        </div>
+        
+        <!-- Chat list -->
+        <div class="flex-1 overflow-y-auto">
+            ${searchQuery&&filtered.length>0?`
+                <div class="px-3 py-2 bg-gray-100 text-xs text-gray-600 text-right">نتائج البحث</div>
+                ${filtered.map(u=>`
+                <div onclick="startChat('${u.uid}')" class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100">
+                    <div class="w-12 h-12 rounded-full bg-gray-300 flex items-center justify-center text-lg flex-shrink-0">
+                        ${u.username.charAt(0)}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex justify-between items-baseline">
+                            <p class="font-semibold text-gray-800 truncate">${u.username}</p>
+                        </div>
+                        <p class="text-xs text-gray-500 truncate">ID: ${u.uid}</p>
+                    </div>
+                </div>
+                `).join('')}
+            `:searchQuery&&filtered.length===0?`
+                <div class="text-center py-16">
+                    <svg class="w-16 h-16 mx-auto text-gray-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                    <p class="text-gray-500 text-sm">لا توجد نتائج</p>
+                </div>
+            `:recentPartners.length>0?recentPartners.map(u=>{
+                const key=chatKey(currentUser.uid,u.uid);
+                const lastMsg=chatMessages[key].slice(-1)[0];
+                const unread=0; // يمكن إضافة عداد غير مقروءة لاحقاً
+                return`
+                <div onclick="startChat('${u.uid}')" class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100">
+                    <div class="w-12 h-12 rounded-full bg-gray-300 flex items-center justify-center text-lg flex-shrink-0">
+                        ${u.username.charAt(0)}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex justify-between items-baseline mb-1">
+                            <p class="font-semibold text-gray-800 truncate">${u.username}</p>
+                            <span class="text-xs text-gray-400 flex-shrink-0 mr-2">${lastMsg?.time.split(':').slice(0,2).join(':')}</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <p class="text-sm text-gray-500 truncate">${lastMsg?lastMsg.text.slice(0,35)+'...':'ابدأ محادثة'}</p>
+                            ${unread>0?`<span class="bg-green-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0">${unread}</span>`:''}
+                        </div>
+                    </div>
+                </div>`;
+            }).join(''):`
+                <div class="text-center py-16">
+                    <svg class="w-24 h-24 mx-auto text-gray-200 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                    <p class="text-gray-500 mb-2">لا توجد محادثات</p>
+                    <p class="text-gray-400 text-sm">ابحث عن شخص بالـ ID لبدء محادثة جديدة</p>
+                </div>
+            `}
+        </div>
+    </div>`;
+}
+
+// ---------- PROFILE ----------
+function renderProfilePage(){
+    if(!currentUser)return'<div class="flex-1 p-8"><p class="text-red-600">يجب تسجيل الدخول</p></div>';
+    const roleLabel=currentUser.role==='founder'?'👑 مؤسس':currentUser.role==='admin'?'🛡️ مشرف':'👨‍🎓 طالب';
+    return `<div class="flex-1 p-6 overflow-auto"><div class="max-w-lg mx-auto space-y-5">
+        <h1 class="text-2xl font-bold text-gray-800 text-right slide-up">👤 الحساب الشخصي</h1>
+        <div class="rounded-2xl p-6 text-white shadow-xl slide-up text-center" style="background:linear-gradient(135deg,#004d26,#00A352)">
+            <div class="w-20 h-20 rounded-full bg-white/20 flex items-center justify-center mx-auto mb-3"><span class="text-4xl">👤</span></div>
+            <h2 class="text-2xl font-bold">${currentUser.username}</h2>
+            <p class="text-green-200 text-sm">${roleLabel}</p>
+            <!-- UID copyable -->
+            <div class="mt-3 inline-flex items-center gap-2 bg-white/10 rounded-full px-4 py-1.5">
+                <button onclick="navigator.clipboard.writeText('${currentUser.uid}').then(()=>alert('تم نسخ الـ ID'))" class="text-xs text-green-200 hover:text-white">📋 نسخ</button>
+                <span class="text-sm font-bold text-white">ID: ${currentUser.uid}</span>
+            </div>
+        </div>
+        <div class="bg-white rounded-2xl shadow-md p-5 slide-up" style="animation-delay:.1s">
+            <h3 class="font-bold text-gray-800 mb-3 text-right">📝 المعلومات</h3>
+            ${[['اسم المستخدم',currentUser.username],['الـ ID',currentUser.uid],['الرتبة',roleLabel],['الحالة','✓ مفعّل']].map(([l,v])=>`<div class="flex justify-between py-2 border-b border-gray-100"><span class="font-semibold text-gray-700 text-sm">${v}</span><span class="text-gray-500 text-sm">${l}</span></div>`).join('')}
+        </div>
+    </div></div>`;
+}
+
+// ---------- ADMIN PANEL ----------
+function renderAdminPanel(){
+    return `<div class="flex-1 p-6 overflow-auto"><div class="max-w-3xl mx-auto space-y-5">
+        <h1 class="text-2xl font-bold text-gray-800 text-right slide-up">🛡️ لوحة المشرف</h1>
+        <!-- pending -->
+        <div class="bg-white rounded-2xl shadow-md p-5 slide-up">
+            <h3 class="font-bold text-gray-800 mb-3 text-right">⏳ طلبات التسجيل (${pendingUsers.length})</h3>
+            ${pendingUsers.length===0?'<p class="text-gray-400 text-center py-3 text-sm">لا طلبات</p>':pendingUsers.map(u=>`<div class="flex items-center justify-between bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-2"><div class="flex gap-2"><button onclick="approveUser(${u.id})" class="bg-green-500 text-white px-3 py-1 rounded text-xs font-bold">✓ قبول</button><button onclick="rejectUser(${u.id})" class="bg-red-500 text-white px-3 py-1 rounded text-xs font-bold">✕</button></div><p class="font-bold text-gray-800 text-sm">${u.username}</p></div>`).join('')}
+        </div>
+        <!-- accounts -->
+        <div class="bg-white rounded-2xl shadow-md p-5 slide-up" style="animation-delay:.08s">
+            <h3 class="font-bold text-gray-800 mb-3 text-right">👥 الحسابات (${users.filter(u=>u.role==='student').length} طالب)</h3>
+            ${users.filter(u=>u.role==='student').length===0?'<p class="text-gray-400 text-center py-3 text-sm">لا طلاب</p>':users.filter(u=>u.role==='student').map(u=>`<div class="border border-gray-200 rounded-lg p-3 mb-2"><div class="flex justify-between items-center mb-2"><span class="text-xs text-gray-400">ID: ${u.uid}</span><p class="font-bold text-gray-800 text-sm">${u.username}</p></div><div class="grid grid-cols-2 gap-1.5">${[['👁️ كلمة المرور',`showUserPassword(${u.id})`,'blue'],['✏️ تعديل الاسم',`editUsername(${u.id})`,'indigo'],['🔑 كلمة المرور',`editPassword(${u.id})`,'purple'],['🗑️ حذف',`deleteUser(${u.id})`,'red']].map(([l,fn,c])=>`<button onclick="${fn}" class="bg-${c}-100 text-${c}-700 py-1 rounded text-xs font-semibold">${l}</button>`).join('')}</div></div>`).join('')}
+        </div>
+        <!-- chat monitoring -->
+        <div class="bg-white rounded-2xl shadow-md p-5 slide-up" style="animation-delay:.12s">
+            <h3 class="font-bold text-gray-800 mb-3 text-right">👁️ مراقبة الدردشة</h3>
+            ${Object.keys(chatMessages).filter(k=>chatMessages[k].length>0).length===0?'<p class="text-gray-400 text-center py-3 text-sm">لا محادثات بعد</p>':
+            Object.keys(chatMessages).filter(k=>chatMessages[k].length>0).map(key=>{
+                const uids=key.split('_');
+                const u1=users.find(u=>u.uid===uids[0]),u2=users.find(u=>u.uid===uids[1]);
+                if(!u1||!u2)return'';
+                const msgs=chatMessages[key];
+                return`<div class="border border-gray-200 rounded-lg p-3 mb-2 cursor-pointer hover:bg-gray-50" onclick="monitorChat('${key}')">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs text-gray-500">${msgs.length} رسالة</span>
+                        <p class="font-semibold text-gray-800 text-sm text-right">${u1.username} ↔ ${u2.username}</p>
+                    </div>
+                    <p class="text-xs text-gray-400 text-right mt-1">${msgs.slice(-1)[0].text.slice(0,40)}...</p>
+                </div>`;
+            }).join('')}
+        </div>
+        <!-- announcements -->
+        <div class="bg-white rounded-2xl shadow-md p-5 slide-up" style="animation-delay:.16s">
+            <div class="flex items-center justify-between mb-3"><button onclick="addAnnouncement()" class="text-white px-3 py-1 rounded text-xs font-bold" style="background:linear-gradient(135deg,#006C35,#00A352)">+ إعلان</button><h3 class="font-bold text-gray-800">📢 الإعلانات</h3></div>
+            ${announcements.map(a=>`<div class="flex items-start justify-between bg-gray-50 border border-gray-100 rounded-lg p-2.5 mb-1.5"><button onclick="deleteAnnouncement(${a.id})" class="bg-red-100 text-red-600 px-1.5 py-0.5 rounded text-xs">حذف</button><p class="text-gray-700 text-xs text-right flex-1 ml-2">${a.text}</p></div>`).join('')}
+        </div>
+        <div class="bg-white rounded-2xl shadow-md p-5 slide-up" style="animation-delay:.2s">
+            <h3 class="font-bold text-gray-800 mb-2 text-right">📚 إدارة المواد</h3>
+            <button onclick="currentView='subjects';render()" class="w-full text-white py-2 rounded-lg text-sm font-bold" style="background:linear-gradient(135deg,#006C35,#00A352)">الذهاب للمواد</button>
+        </div>
+    </div></div>`;
+}
+
+// Monitor a specific chat (admin view)
+let monitorKey=null;
+function monitorChat(key){monitorKey=key;render();}
+function renderMonitorChat(){
+    const uids=monitorKey.split('_');
+    const u1=users.find(u=>u.uid===uids[0]),u2=users.find(u=>u.uid===uids[1]);
+    const msgs=chatMessages[monitorKey]||[];
+    return`<div class="flex-1 flex flex-col" style="min-height:0">
+        <div class="p-3 border-b bg-white flex items-center justify-between flex-shrink-0">
+            <button onclick="monitorKey=null;currentView='admin';render()" class="text-sm text-gray-500">← رجوع</button>
+            <div class="text-right"><p class="font-bold text-gray-800 text-sm">${u1?.username||'؟'} ↔ ${u2?.username||'؟'}</p><p class="text-xs text-red-500">👁️ وضع المراقبة</p></div>
+        </div>
+        <div class="flex-1 overflow-y-auto p-4 space-y-2 bg-gray-50">
+            ${msgs.length===0?'<p class="text-gray-400 text-center py-8 text-sm">لا رسائل</p>':msgs.map(m=>{const sender=users.find(u=>u.uid===m.from);const isFirst=m.from===uids[0];return`<div class="flex ${isFirst?'justify-start':'justify-end'} msg-in"><div class="max-w-[70%] rounded-2xl px-3 py-2 shadow-sm ${isFirst?'bg-blue-50 border border-blue-200 rounded-tl-none':'bg-orange-50 border border-orange-200 rounded-tr-none'}"><div class="flex justify-between items-center mb-0.5"><span class="text-xs text-gray-400">${m.time}</span><span class="text-xs font-bold ${isFirst?'text-blue-600':'text-orange-600'}">${sender?.username||'؟'}</span></div><p class="text-right text-sm text-gray-800 whitespace-pre-wrap">${m.text}</p></div></div>`;}).join('')}
+        </div>
+    </div>`;
+}
+
+// ---------- FOUNDER PANEL ----------
+function renderFounderPanel(){
+    const admins=users.filter(u=>u.role==='admin');
+    const founders=users.filter(u=>u.role==='founder');
+    return`<div class="flex-1 p-6 overflow-auto"><div class="max-w-3xl mx-auto space-y-5">
+        <h1 class="text-2xl font-bold text-gray-800 text-right slide-up">👑 لوحة المؤسس</h1>
+        <!-- add admin -->
+        <div class="bg-white rounded-2xl shadow-md p-5 slide-up">
+            <div class="flex items-center justify-between mb-3"><button onclick="founderAddAdmin()" class="text-white px-4 py-2 rounded-lg text-sm font-bold shadow" style="background:linear-gradient(135deg,#006C35,#00A352)">+ إضافة مشرف جديد</button><h3 class="font-bold text-gray-800">👥 إدارة المشرفين</h3></div>
+            ${admins.length===0?'<p class="text-gray-400 text-center py-3 text-sm">لا مشرفين</p>':admins.map(u=>`<div class="flex items-center justify-between border border-gray-200 rounded-lg p-3 mb-2">
+                <div class="flex gap-2">
+                    <button onclick="changeRole(${u.id})" class="bg-amber-100 text-amber-700 px-2 py-1 rounded text-xs font-bold">👑 غيّر الرتبة</button>
+                    <button onclick="editPassword(${u.id})" class="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs">🔑</button>
+                    <button onclick="deleteUser(${u.id})" class="bg-red-100 text-red-600 px-2 py-1 rounded text-xs">🗑️</button>
+                </div>
+                <div class="text-right"><p class="font-bold text-gray-800 text-sm">${u.username}</p><p class="text-xs text-gray-400">ID: ${u.uid} • مشرف</p></div>
+            </div>`).join('')}
+        </div>
+        <!-- all users + role control -->
+        <div class="bg-white rounded-2xl shadow-md p-5 slide-up" style="animation-delay:.1s">
+            <h3 class="font-bold text-gray-800 mb-3 text-right">📋 كل الحسابات (${users.length})</h3>
+            ${users.map(u=>{if(u.id===currentUser.id)return'';const badge=u.role==='founder'?'bg-amber-100 text-amber-700':u.role==='admin'?'bg-blue-100 text-blue-700':'bg-green-100 text-green-700';const rl=u.role==='founder'?'مؤسس':u.role==='admin'?'مشرف':'طالب';return`<div class="flex items-center justify-between border border-gray-200 rounded-lg p-3 mb-2">
+                <div class="flex gap-1.5">
+                    <button onclick="changeRole(${u.id})" class="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-xs font-bold">👑 رتبة</button>
+                    <button onclick="showUserPassword(${u.id})" class="bg-blue-100 text-blue-600 px-2 py-0.5 rounded text-xs">👁️</button>
+                    <button onclick="deleteUser(${u.id})" class="bg-red-100 text-red-600 px-2 py-0.5 rounded text-xs">🗑️</button>
+                </div>
+                <div class="text-right"><div class="flex items-center gap-2"><span class="text-xs ${badge} px-1.5 py-0.5 rounded-full">${rl}</span><p class="font-bold text-gray-800 text-sm">${u.username}</p></div><p class="text-xs text-gray-400">ID: ${u.uid}</p></div>
+            </div>`;}).join('')}
+        </div>
+    </div></div>`;
+}
+
+// ===================== MAIN RENDER =====================
+function render(){
+    const app=document.getElementById('app');
+    if(!currentUser||currentView==='login'){app.innerHTML=renderLoginPage();return;}
+
+    let content='';
+    // monitor chat override
+    if(monitorKey&&(currentUser.role==='admin'||currentUser.role==='founder')){content=renderMonitorChat();}
+    else if(selectedSubject) content=renderSubjectDetail();
+    else if(currentView==='home')      content=renderHomePage();
+    else if(currentView==='subjects')  content=renderSubjectsPage();
+    else if(currentView==='timetable') content=renderTimetablePage();
+    else if(currentView==='ai')        content=renderAiPage();
+    else if(currentView==='events')    content=renderEventsPage();
+    else if(currentView==='news')      content=renderNewsPage();
+    else if(currentView==='chat')      content=renderChatPage();
+    else if(currentView==='profile')   content=renderProfilePage();
+    else if(currentView==='admin')     content=renderAdminPanel();
+    else if(currentView==='founder')   content=renderFounderPanel();
+    else                               content=renderHomePage();
+
+    app.innerHTML=`<div class="flex" style="min-height:100vh">${renderSidebar()}${content}</div>`;
+
+    if(currentView==='ai'){const c=document.getElementById('ai-messages-container');if(c)c.scrollTop=c.scrollHeight;}
+    if(currentView==='chat'&&chatPartner){const c=document.getElementById('chat-msgs');if(c)c.scrollTop=c.scrollHeight;}
+    if(currentView==='chat'&&!chatPartner){const inp=document.getElementById('chat-search');if(inp)inp.focus();}
+}
+
+loadData();
+render();
+</script>
+</body>
+</html>
